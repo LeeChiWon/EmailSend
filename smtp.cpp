@@ -1,6 +1,6 @@
 #include "smtp.h"
 
-Smtp::Smtp( const QString &user, const QString &pass, const QString &host, int port, int timeout )
+Smtp::Smtp( const QString &user, const QString &pass, const QString &host, const int &port, int timeout )
 {
     socket = new QSslSocket(this);
 
@@ -21,22 +21,58 @@ Smtp::Smtp( const QString &user, const QString &pass, const QString &host, int p
 
 }
 
-void Smtp::sendMail(const QString &from, const QString &to, const QString &subject, const QString &body)
+void Smtp::sendMail(const QString &from, const QString &to, const QString &subject, const QString &body,  QStringList files)
 {
     message = "To: " + to + "\n";
     message.append("From: " + from + "\n");
     message.append("Subject: " + subject + "\n");
-    message.append("\n" + body + "\n");
+
+    message.append("MIME-Version: 1.0\n");
+    message.append("Content-Type: multipart/mixed; boundary=frontier\n\n");
+
+    message.append( "--frontier\n" );
+    //message.append( "Content-Type: text/html\n\n" );  //Uncomment this for HTML formating, coment the line below
+    message.append( "Content-Type: text/plain\n\n" );
+    message.append(body);
+    message.append("\n\n");
+
+    if(!files.isEmpty())
+    {
+        qDebug() << "Files to be sent: " << files.size();
+        foreach(QString filePath, files)
+        {
+            QFile file(filePath);
+            if(file.exists())
+            {
+                if (!file.open(QIODevice::ReadOnly))
+                {
+                    qDebug("Couldn't open the file");
+                    QMessageBox::warning( 0, tr( "Qt Simple SMTP client" ), tr( "Couldn't open the file\n\n" )  );
+                    return ;
+                }
+                QByteArray bytes = file.readAll();
+                message.append( "--frontier\n" );
+                message.append( "Content-Type: application/octet-stream\nContent-Disposition: attachment; filename="+ QFileInfo(file.fileName()).fileName() +";\nContent-Transfer-Encoding: base64\n\n" );
+                message.append(bytes.toBase64());
+                message.append("\n");
+            }
+        }
+    }
+    else
+        qDebug() << "No attachments found";
+
+    message.append( "--frontier--\n" );
+    // message.append("\n" + body + "\n");
     message.replace( QString::fromLatin1( "\n" ), QString::fromLatin1( "\r\n" ) );
     message.replace( QString::fromLatin1( "\r\n.\r\n" ),
-    QString::fromLatin1( "\r\n..\r\n" ) );
+                     QString::fromLatin1( "\r\n..\r\n" ) );
     this->from = from;
     rcpt = to;
     state = Init;
     socket->connectToHostEncrypted(host, port); //"smtp.gmail.com" and 465 for gmail TLS
     if (!socket->waitForConnected(timeout)) {
-         qDebug() << socket->errorString();
-     }
+        qDebug() << socket->errorString();
+    }
 
     t = new QTextStream( socket );
 
@@ -75,7 +111,7 @@ void Smtp::connected()
 void Smtp::readyRead()
 {
 
-     qDebug() <<"readyRead";
+    qDebug() <<"readyRead";
     // SMTP is line-oriented
 
     QString responseLine;
@@ -194,8 +230,9 @@ void Smtp::readyRead()
     }
     else if ( state == Close )
     {
-        deleteLater();
+        socket->close();
         return;
+        this->deleteLater();
     }
     else
     {
